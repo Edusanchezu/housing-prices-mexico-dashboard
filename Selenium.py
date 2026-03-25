@@ -44,7 +44,7 @@ def extraer_ciudad(url, nombre_ciudad):
 
 
 # ==============================
-# 🔥 SOLO EDITAS ESTO
+# AQUI SE EXTRAEN LOS DATOS DE 3 CIUDADES, PARA NO SATURAR LA PAGINA WEB, CAMBIANDO SOLO EL NOMBRE Y LA URL
 # ==============================
 
 ciudades = [
