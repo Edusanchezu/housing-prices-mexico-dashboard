@@ -2,99 +2,99 @@
 # IMPORTAR LIBRERÍAS
 # ==============================
 from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 import json
 import pandas as pd
-import time
 import os
 
 
 # ==============================
 # FUNCIÓN PARA EXTRAER DATOS
 # ==============================
-def extraer_ciudad(url, nombre_ciudad):
-    driver = webdriver.Chrome()
+def extraer_ciudad(driver, url, nombre_ciudad):
     driver.get(url)
 
-    time.sleep(5)
+    # Espera hasta 15 s a que aparezca el div con data-chart
+    try:
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-chart]"))
+        )
+    except Exception:
+        print(f"No se encontró info para {nombre_ciudad}")
+        return None
 
-    html = driver.page_source
-    soup = BeautifulSoup(html, "html.parser")
-
+    soup = BeautifulSoup(driver.page_source, "html.parser")
     div = soup.find("div", attrs={"data-chart": True})
 
     if div is None:
         print(f"No se encontró info para {nombre_ciudad}")
-        driver.quit()
         return None
 
-    raw_data = div["data-chart"]
-    data = json.loads(raw_data)
+    data = json.loads(div["data-chart"])
 
+    # Solo la serie de la región (ej. Nayarit); se ignora data["parent"] (México)
     stats = data["statistics"]
 
-    df = pd.DataFrame(stats)
-    df.columns = ["fecha", "precio"]
-
+    df = pd.DataFrame(stats).rename(columns={"label": "fecha", "value": "precio"})
     df["fecha"] = pd.to_datetime(df["fecha"])
     df["ciudad"] = nombre_ciudad
 
-    driver.quit()
     return df
 
 
 # ==============================
-# AQUI SE EXTRAEN LOS DATOS DE 3 CIUDADES, PARA NO SATURAR LA PAGINA WEB, CAMBIANDO SOLO EL NOMBRE Y LA URL
+# CIUDADES A EXTRAER (cambia solo nombre y URL)
 # ==============================
-
 ciudades = [
-    {"nombre": "Guadalajara", "url": "https://www.vivanuncios.com.mx/s-inmuebles/guadalajara/v1c30l14822p1"},
-    {"nombre": "LaPaz", "url": "https://www.vivanuncios.com.mx/s-inmuebles/la-paz-bcs/v1c30l10017p1"},
-    {"nombre": "Mexicali", "url": "https://www.vivanuncios.com.mx/s-inmuebles/mexicali/v1c30l10012p1"},
+    {"nombre": "Oaxaca", "url": "https://www.vivanuncios.com.mx/s-inmuebles/oaxaca/v1c30l1019p1"},
+    # Agrega más ciudades con el mismo formato:
+    # {"nombre": "Guadalajara", "url": "https://..."},
 ]
-
-# 👉 aquí solo agregas más ciudades siguiendo el mismo formato
 
 
 # ==============================
 # EXTRAER TODO AUTOMÁTICAMENTE
 # ==============================
-
 dfs = []
+driver = webdriver.Chrome()  # un solo navegador para todas las ciudades
 
-for ciudad in ciudades:
-    print(f"Extrayendo {ciudad['nombre']}...")
-    df = extraer_ciudad(ciudad["url"], ciudad["nombre"])
+try:
+    for ciudad in ciudades:
+        print(f"Extrayendo {ciudad['nombre']}...")
+        df = extraer_ciudad(driver, ciudad["url"], ciudad["nombre"])
 
-    if df is not None:
-        dfs.append(df)
-
-
-df_nuevo = pd.concat(dfs)
+        if df is not None:
+            dfs.append(df)
+finally:
+    driver.quit()
 
 
 # ==============================
 # GUARDADO ACUMULATIVO
 # ==============================
-
-archivo = "dataset_vivienda_mexico.csv"
-
-if os.path.exists(archivo):
-    df_existente = pd.read_csv(archivo)
-
-    # convertir fechas por si acaso
-    df_existente["fecha"] = pd.to_datetime(df_existente["fecha"])
-
-    # unir datasets
-    df_total = pd.concat([df_existente, df_nuevo])
-
-    # eliminar duplicados
-    df_total = df_total.drop_duplicates(subset=["fecha", "ciudad"])
-
+if not dfs:
+    print("No se extrajo ningún dato. No se modificó el archivo.")
 else:
-    df_total = df_nuevo
+    df_nuevo = pd.concat(dfs, ignore_index=True)
 
+    archivo = "dataset_vivienda_mexico.csv"
 
-df_total.to_csv(archivo, index=False)
+    if os.path.exists(archivo):
+        df_existente = pd.read_csv(archivo)
+        df_existente["fecha"] = pd.to_datetime(df_existente["fecha"])
 
-print("Dataset actualizado y guardado ✅")
+        df_total = pd.concat([df_existente, df_nuevo], ignore_index=True)
+        df_total = df_total.drop_duplicates(subset=["fecha", "ciudad"], keep="last")
+    else:
+        df_total = df_nuevo
+
+    df_total = df_total.sort_values(["ciudad", "fecha"])
+    print(df_total.head())
+    print("Filas a guardar:", len(df_total))
+    print("Carpeta de trabajo:", os.getcwd())
+    df_total.to_csv(archivo, index=False)
+
+    print("Dataset actualizado y guardado ")
